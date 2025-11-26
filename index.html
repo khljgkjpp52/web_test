@@ -1,1 +1,301 @@
-index123456789
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>簡易節拍器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 50px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: inline-block;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .bpm-control {
+            margin: 20px 0;
+        }
+        .bpm-input {
+            width: 60px;
+            padding: 10px;
+            font-size: 20px;
+            text-align: center;
+            margin: 0 10px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .preset-btns {
+            margin: 10px 0;
+        }
+        .visualizer {
+            margin: 30px auto;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        .beat-circle {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #ddd;
+            transition: all 0.1s;
+        }
+        .beat-circle.active {
+            transform: scale(1.3);
+            background: #3498db;
+        }
+        .beat-circle.downbeat {
+            transform: scale(1.5);
+            background: #e74c3c;
+        }
+        .time-signature {
+            margin: 20px 0;
+        }
+        .volume-control {
+            margin: 20px 0;
+        }
+        .volume-slider {
+            width: 200px;
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>簡易節拍器</h1>
+        
+        <!-- BPM 控制 -->
+        <div class="bpm-control">
+            <button id="bpm-down-10">-10</button>
+            <button id="bpm-down-5">-5</button>
+            <input type="number" id="bpm-input" class="bpm-input" value="190" min="40" max="300">
+            <button id="bpm-up-5">+5</button>
+            <button id="bpm-up-10">+10</button>
+        </div>
+        
+        <!-- 預設 BPM -->
+        <div class="preset-btns">
+            <button class="preset" data-bpm="180">自訂1 (180)</button>
+            <button class="preset" data-bpm="185">自訂2 (185)</button>
+            <button class="preset" data-bpm="190">自訂3 (190)</button>
+        </div>
+        
+        <!-- 節拍類型 -->
+        <div class="time-signature">
+            <h3>節拍類型</h3>
+            <button class="time-sig" data-beats="4">4/4 拍</button>
+            <button class="time-sig" data-beats="3">3/4 拍</button>
+            <button class="time-sig" data-beats="6">6/8 拍</button>
+        </div>
+        
+        <!-- 音量控制 -->
+        <div class="volume-control">
+            <h3>音量</h3>
+            <input type="range" id="volume-slider" class="volume-slider" 
+                min="0" max="100" step="1" value="14">
+            <span id="volume-value">14%</span> 
+        </div>
+        
+        <!-- 節拍視覺化 -->
+        <div class="visualizer" id="visualizer">
+            <!-- 動態生成圓點 -->
+        </div>
+        
+        <!-- 控制按鈕 -->
+        <button id="start-stop">開始</button>
+    </div>
+
+    <script>
+        // 節拍器狀態
+        let bpm = 190;
+        let isPlaying = false;
+        let timer = null;
+        let currentBeat = 0;
+        let beatsPerMeasure = 4; // 預設 4/4 拍
+        
+        // Web Audio API 相關變數
+        let audioContext, masterGain, downbeatSound, upbeatSound;
+        
+        // DOM 元素
+        const bpmInput = document.getElementById('bpm-input');
+        const startStopBtn = document.getElementById('start-stop');
+        const visualizer = document.getElementById('visualizer');
+        const volumeSlider = document.getElementById('volume-slider');
+        const volumeValue = document.getElementById('volume-value');
+        
+        // 初始化音效
+        function initSounds() {
+            // 確保只初始化一次
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                masterGain = audioContext.createGain();
+                
+                // 修改這裡！預設音量降為一半（0.5 → 0.25），但保持滑桿顯示50%
+                masterGain.gain.value = 0.25;  // 實際音量0~1自行修改
+                volumeSlider.value = 14;       // 保持滑桿顯示在50%位置
+                volumeValue.textContent = volumeSlider.value + "%";
+
+                masterGain.connect(audioContext.destination);
+                
+                // 重音 (第一拍)
+                downbeatSound = audioContext.createOscillator();
+                downbeatSound.type = 'sine';
+                downbeatSound.frequency.value = 800;
+                const downbeatGain = audioContext.createGain();
+                downbeatGain.gain.value = 0;
+                downbeatSound.connect(downbeatGain);
+                downbeatGain.connect(masterGain);
+                downbeatSound.start();
+                
+                // 普通音 (其他拍)
+                upbeatSound = audioContext.createOscillator();
+                upbeatSound.type = 'sine';
+                upbeatSound.frequency.value = 400;
+                const upbeatGain = audioContext.createGain();
+                upbeatGain.gain.value = 0;
+                upbeatSound.connect(upbeatGain);
+                upbeatSound.start();
+                upbeatGain.connect(masterGain);
+                
+                // 提供全局存取（用於播放時控制）
+                window.metronomeGains = {
+                    downbeat: downbeatGain,
+                    upbeat: upbeatGain
+                };
+            }
+        }
+        
+        // 生成節拍視覺化圓點
+        function generateVisualizer() {
+            visualizer.innerHTML = '';
+            for (let i = 0; i < beatsPerMeasure; i++) {
+                const circle = document.createElement('div');
+                circle.className = 'beat-circle';
+                circle.dataset.beat = i;
+                visualizer.appendChild(circle);
+            }
+        }
+        
+        // 播放節拍
+        function playBeat() {
+            const circles = document.querySelectorAll('.beat-circle');
+            
+            // 重置所有圓點狀態
+            circles.forEach(circle => {
+                circle.classList.remove('active', 'downbeat');
+            });
+            
+            // 更新當前節拍視覺化
+            if (currentBeat === 0) {
+                circles[currentBeat].classList.add('downbeat');
+                // 播放重音
+                window.metronomeGains.downbeat.gain.value = 1;
+                setTimeout(() => {
+                    window.metronomeGains.downbeat.gain.value = 0;
+                }, 50);
+            } else {
+                circles[currentBeat].classList.add('active');
+                // 播放普通音
+                window.metronomeGains.upbeat.gain.value = 1;
+                setTimeout(() => {
+                    window.metronomeGains.upbeat.gain.value = 0;
+                }, 50);
+            }
+            
+            // 更新節拍計數
+            currentBeat = (currentBeat + 1) % beatsPerMeasure;
+        }
+        
+        // 開始/停止節拍器
+        function toggleMetronome() {
+            if (isPlaying) {
+                clearInterval(timer);
+                startStopBtn.textContent = '開始';
+                isPlaying = false;
+            } else {
+                // 確保音效已初始化（解決自動播放限制）
+                initSounds();
+                
+                const interval = 60000 / bpm; // BPM 轉換為毫秒
+                timer = setInterval(playBeat, interval);
+                startStopBtn.textContent = '停止';
+                isPlaying = true;
+            }
+        }
+        
+        // 事件監聽
+        document.getElementById('bpm-up-5').addEventListener('click', () => {
+            bpm = Math.min(bpm + 5, 300);
+            bpmInput.value = bpm;
+        });
+        
+        document.getElementById('bpm-up-10').addEventListener('click', () => {
+            bpm = Math.min(bpm + 10, 300);
+            bpmInput.value = bpm;
+        });
+        
+        document.getElementById('bpm-down-5').addEventListener('click', () => {
+            bpm = Math.max(bpm - 5, 40);
+            bpmInput.value = bpm;
+        });
+        
+        document.getElementById('bpm-down-10').addEventListener('click', () => {
+            bpm = Math.max(bpm - 10, 40);
+            bpmInput.value = bpm;
+        });
+        
+        bpmInput.addEventListener('change', () => {
+            bpm = Math.min(Math.max(parseInt(bpmInput.value), 40), 300);
+            bpmInput.value = bpm;
+        });
+        
+        // 預設 BPM 按鈕
+        document.querySelectorAll('.preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                bpm = parseInt(btn.dataset.bpm);
+                bpmInput.value = bpm;
+            });
+        });
+        
+        // 節拍類型切換
+        document.querySelectorAll('.time-sig').forEach(btn => {
+            btn.addEventListener('click', () => {
+                beatsPerMeasure = parseInt(btn.dataset.beats);
+                currentBeat = 0;
+                generateVisualizer();
+            });
+        });
+        
+        // 音量控制（0~100 连续调整）
+        volumeSlider.addEventListener('input', () => {
+            const volumePercent = parseInt(volumeSlider.value); // 0~100
+            volumeValue.textContent = `${volumePercent}%`;
+            if (masterGain) {
+                masterGain.gain.value = volumePercent / 100; // 转换为 0~1
+            }
+        });
+        
+        startStopBtn.addEventListener('click', toggleMetronome);
+        
+        // 初始化視覺化
+        generateVisualizer();
+    </script>
+</body>
+</html>
